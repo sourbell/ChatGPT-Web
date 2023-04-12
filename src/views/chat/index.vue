@@ -16,60 +16,45 @@ import { useBasicLayout } from '@/hooks/useBasicLayout'
 import { useChatStore, usePromptStore } from '@/store'
 import { fetchChatAPIProcess } from '@/api'
 import { t } from '@/locales'
-
 let controller = new AbortController()
-
 const openLongReply = import.meta.env.VITE_GLOB_OPEN_LONG_REPLY === 'true'
-
 const route = useRoute()
 const dialog = useDialog()
 const ms = useMessage()
-
 const chatStore = useChatStore()
-
 useCopyCode()
-
 const { isMobile } = useBasicLayout()
 const { addChat, updateChat, updateChatSome, getChatByUuidAndIndex } = useChat()
 const { scrollRef, scrollToBottom, scrollToBottomIfAtBottom } = useScroll()
 const { usingContext, toggleUsingContext } = useUsingContext()
-
 const { uuid } = route.params as { uuid: string }
-
 const dataSources = computed(() => chatStore.getChatByUuid(+uuid))
-const conversationList = computed(() => dataSources.value.filter(item => (!item.inversion && !!item.conversationOptions)))
-
+const conversationList = computed(() => dataSources.value.filter(item => (!item.inversion && !item.error)))
 const prompt = ref<string>('')
 const loading = ref<boolean>(false)
 const inputRef = ref<Ref | null>(null)
-
 // 添加PromptStore
 const promptStore = usePromptStore()
-
 // 使用storeToRefs，保证store修改后，联想部分能够重新渲染
 const { promptList: promptTemplate } = storeToRefs<any>(promptStore)
-
+let lastOptions: Chat.ConversationRequest = {}
 // 未知原因刷新页面，loading 状态不会重置，手动重置
 dataSources.value.forEach((item, index) => {
+  if (item.conversationOptions?.conversationId != null)
+    lastOptions = item.conversationOptions
   if (item.loading)
     updateChatSome(+uuid, index, { loading: false })
 })
-
 function handleSubmit() {
   onConversation()
 }
-
 async function onConversation() {
   let message = prompt.value
-
   if (loading.value)
     return
-
   if (!message || message.trim() === '')
     return
-
   controller = new AbortController()
-
   addChat(
     +uuid,
     {
@@ -82,16 +67,12 @@ async function onConversation() {
     },
   )
   scrollToBottom()
-
   loading.value = true
   prompt.value = ''
-
-  let options: Chat.ConversationRequest = {}
+  let options: Chat.ConversationRequest = lastOptions
   const lastContext = conversationList.value[conversationList.value.length - 1]?.conversationOptions
-
   if (lastContext && usingContext.value)
     options = { ...lastContext }
-
   addChat(
     +uuid,
     {
@@ -105,7 +86,6 @@ async function onConversation() {
     },
   )
   scrollToBottom()
-
   try {
     let lastText = ''
     const fetchChatAPIOnce = async () => {
@@ -136,14 +116,14 @@ async function onConversation() {
                 requestOptions: { prompt: message, options: { ...options } },
               },
             )
-
+            if (data != null && data.conversationId != null && data.conversationId.length !== 0)
+              lastOptions = { conversationId: data.conversationId, parentMessageId: data.id }
             if (openLongReply && data.detail.choices[0].finish_reason === 'length') {
               options.parentMessageId = data.id
               lastText = data.text
               message = ''
               return fetchChatAPIOnce()
             }
-
             scrollToBottomIfAtBottom()
           }
           catch (error) {
@@ -153,12 +133,10 @@ async function onConversation() {
       })
       updateChatSome(+uuid, dataSources.value.length - 1, { loading: false })
     }
-
     await fetchChatAPIOnce()
   }
   catch (error: any) {
     const errorMessage = error?.message ?? t('common.wrong')
-
     if (error.message === 'canceled') {
       updateChatSome(
         +uuid,
@@ -170,9 +148,7 @@ async function onConversation() {
       scrollToBottomIfAtBottom()
       return
     }
-
     const currentChat = getChatByUuidAndIndex(+uuid, dataSources.value.length - 1)
-
     if (currentChat?.text && currentChat.text !== '') {
       updateChatSome(
         +uuid,
@@ -185,7 +161,6 @@ async function onConversation() {
       )
       return
     }
-
     updateChat(
       +uuid,
       dataSources.value.length - 1,
@@ -205,24 +180,16 @@ async function onConversation() {
     loading.value = false
   }
 }
-
 async function onRegenerate(index: number) {
   if (loading.value)
     return
-
   controller = new AbortController()
-
   const { requestOptions } = dataSources.value[index]
-
   let message = requestOptions?.prompt ?? ''
-
   let options: Chat.ConversationRequest = {}
-
   if (requestOptions.options)
     options = { ...requestOptions.options }
-
   loading.value = true
-
   updateChat(
     +uuid,
     index,
@@ -236,7 +203,6 @@ async function onRegenerate(index: number) {
       requestOptions: { prompt: message, options: { ...options } },
     },
   )
-
   try {
     let lastText = ''
     const fetchChatAPIOnce = async () => {
@@ -267,7 +233,6 @@ async function onRegenerate(index: number) {
                 requestOptions: { prompt: message, options: { ...options } },
               },
             )
-
             if (openLongReply && data.detail.choices[0].finish_reason === 'length') {
               options.parentMessageId = data.id
               lastText = data.text
@@ -295,9 +260,7 @@ async function onRegenerate(index: number) {
       )
       return
     }
-
     const errorMessage = error?.message ?? t('common.wrong')
-
     updateChat(
       +uuid,
       index,
@@ -316,11 +279,9 @@ async function onRegenerate(index: number) {
     loading.value = false
   }
 }
-
 function handleExport() {
   if (loading.value)
     return
-
   const d = dialog.warning({
     title: t('chat.exportImage'),
     content: t('chat.exportImageConfirm'),
@@ -340,7 +301,6 @@ function handleExport() {
         tempLink.setAttribute('download', 'chat-shot.png')
         if (typeof tempLink.download === 'undefined')
           tempLink.setAttribute('target', '_blank')
-
         document.body.appendChild(tempLink)
         tempLink.click()
         document.body.removeChild(tempLink)
@@ -358,11 +318,9 @@ function handleExport() {
     },
   })
 }
-
 function handleDelete(index: number) {
   if (loading.value)
     return
-
   dialog.warning({
     title: t('chat.deleteMessage'),
     content: t('chat.deleteMessageConfirm'),
@@ -373,11 +331,9 @@ function handleDelete(index: number) {
     },
   })
 }
-
 function handleClear() {
   if (loading.value)
     return
-
   dialog.warning({
     title: t('chat.clearChat'),
     content: t('chat.clearChatConfirm'),
@@ -388,7 +344,6 @@ function handleClear() {
     },
   })
 }
-
 function handleEnter(event: KeyboardEvent) {
   if (!isMobile.value) {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -403,14 +358,12 @@ function handleEnter(event: KeyboardEvent) {
     }
   }
 }
-
 function handleStop() {
   if (loading.value) {
     controller.abort()
     loading.value = false
   }
 }
-
 // 可优化部分
 // 搜索选项计算，这里使用value作为索引项，所以当出现重复value时渲染异常(多项同时出现选中效果)
 // 理想状态下其实应该是key作为索引项,但官方的renderOption会出现问题，所以就需要value反renderLabel实现
@@ -427,7 +380,6 @@ const searchOptions = computed(() => {
     return []
   }
 })
-
 // value反渲染key
 const renderOption = (option: { label: string }) => {
   for (const i of promptTemplate.value) {
@@ -436,30 +388,25 @@ const renderOption = (option: { label: string }) => {
   }
   return []
 }
-
 const placeholder = computed(() => {
   if (isMobile.value)
     return t('chat.placeholderMobile')
   return t('chat.placeholder')
 })
-
 const buttonDisabled = computed(() => {
   return loading.value || !prompt.value || prompt.value.trim() === ''
 })
-
 const footerClass = computed(() => {
   let classes = ['p-4']
   if (isMobile.value)
     classes = ['sticky', 'left-0', 'bottom-0', 'right-0', 'p-2', 'pr-3', 'overflow-hidden']
   return classes
 })
-
 onMounted(() => {
   scrollToBottom()
   if (inputRef.value && !isMobile.value)
     inputRef.value?.focus()
 })
-
 onUnmounted(() => {
   if (loading.value)
     controller.abort()
